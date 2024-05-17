@@ -1,0 +1,111 @@
+```{r}
+# Load necessary library for solving differential equations
+library(deSolve)
+
+# Define the dengue transmission model using differential equations.
+# This function calculates the rate of change for each group (e.g., susceptible humans, infected humans) based on current states and parameters.
+dengue_model <- function(t, state, parameters) {
+  with(as.list(c(state, parameters)), {
+    
+    # Differential equations for the human populations (Susceptible, Infected, Resistant)
+    dSH <- (μH * NH) - ((βH * b) / (NH + m) * SH * IV) - (μH * SH)
+    dIH <- ((βH * b) / (NH + m) * SH * IV) - (μH + γH) * IH
+    dRH <- (γH * IH) - (μH * RH)
+    
+    # Differential equations for the vector (mosquito) populations (Susceptible, Infected)
+    dSV <- A - ((βv * b) / (NH + m) * SV * IH) - (μV * SV)
+    dIV <- ((βv * b) / (NH + m) * SV * IH) - (μV * IV)
+    
+    return(list(c(dSH, dIH, dRH, dSV, dIV)))
+  })
+}
+
+# Numerical method for approximating the definite integral
+# This function calculates the area under a curve using the trapezoidal rule, which will be used to determine the cumulative number of infections over time.
+trapezoidal_rule <- function(x, y) {
+  return(sum(diff(x) * (y[-length(y)] + y[-1]) / 2))
+}
+
+# Define parameters for the model and initial state of the system
+parameters <- c(μH=0.0000457, βH=0.75, b=0.5, m=0, μV=0.25, βv=1, NH=10000, γH=0.1428, A=1250)
+initial_SH <- 100000
+initial_SV <- 4500
+initial_IH_IV <- 1
+state <- c(SH=initial_SH, IH=initial_IH_IV, RH=0, SV=initial_SV, IV=initial_IH_IV)
+
+# Define the time points at which we want to obtain model predictions (days)
+# Replace "Insert the amount of days you want to run here" with a numeric value
+times <- seq(0, 365, by=1) # Example: Run for 365 days
+
+# List of different proportions of unprotected individuals to run the model for
+# Replace "Insert decimal representations of percentages ex. 0,0.25,1" with actual values
+p_values <- c(0, 0.25, 0.5, 0.75, 1)
+
+results_list <- list()
+
+# Variables to store cumulative numbers of infected individuals for each scenario
+total_infected_humans <- numeric(length(p_values))
+total_infected_vectors <- numeric(length(p_values))
+total_unique_infected_humans <- numeric(length(p_values))
+
+# Run the model for each proportion of unprotected individuals
+for(p in p_values) {
+    # Modify biting rate based on protection level
+    parameters["b"] <- 0.5 * p
+    # Run the differential equation model
+    result <- ode(y=state, times=times, func=dengue_model, parms=parameters)
+    results_list[[length(results_list) + 1]] <- result
+
+    # Calculate cumulative number of infections using the trapezoidal rule
+    IH_values <- result[, "IH"]
+    IV_values <- result[, "IV"]
+    total_infected_humans[length(results_list)] <- trapezoidal_rule(times, IH_values)
+    total_infected_vectors[length(results_list)] <- trapezoidal_rule(times, IV_values)
+    # Calculate the total number of unique humans infected during the entire period
+    total_unique_infected_humans[length(results_list)] <- initial_SH - result[nrow(result), "SH"]
+}
+
+# Define colors for plots
+colors <- rainbow(length(p_values))
+
+# Define path to save the EPS files on the desktop
+desktop_path <- path.expand("~/Desktop")
+
+# Function to plot and save individual dynamics of each category (e.g., susceptible humans, infected humans) in EPS format
+plot_individual <- function(idx, title) {
+  # Set the filename for the EPS file
+  eps_filename <- paste0(desktop_path, "/", title, ".eps")
+  
+  # Open an EPS device for plotting
+  postscript(eps_filename, width=8, height=6, horizontal=FALSE, paper="special")
+  
+  # Plot the dynamics for the specified category
+  plot(results_list[[1]][, 1], results_list[[1]][, idx], type="n", 
+       xlab="Time (days)", ylab="Population", 
+       ylim=c(0, max(sapply(results_list, function(x) max(x[, idx])))), 
+       xlim=c(0, max(times)), main=title)
+  
+  # Add lines for each proportion of unprotected individuals
+  for (j in 1:length(p_values)) {
+    lines(results_list[[j]][, 1], results_list[[j]][, idx], col=colors[j], lwd=2)
+  }
+  
+  # Add legend to the plot
+  legend("topright", legend=paste0((p_values * 100), "% Unprotected"), col=colors, lty=1, cex=0.8)
+  
+  # Close the EPS device, saving the plot
+  dev.off()
+}
+
+# Generate and save plots for each category of individuals
+categories <- c("Susceptible Humans (SH)", "Infected Humans (IH)", "Resistant Humans (RH)", "Susceptible Vectors (SV)", "Infected Vectors (IV)")
+for(i in 2:6) {
+  plot_individual(i, categories[i-1])
+}
+
+# Print summary table with the cumulative number of infections for each scenario
+print(data.frame(BiteAbility = p_values * 100,
+                 CumulativeInfectedVectors = total_infected_vectors,
+                 UniqueInfectedHumans = total_unique_infected_humans))
+
+```
